@@ -1,26 +1,50 @@
 {
   "expo": {
-    "name": "mongolocr",
+    "name": "MongolOCR",
     "slug": "mongolocr",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#ffffff",
+      "plugins": [
+      [
+        "expo-camera",
+        "expo-image-picker",
+        {
+        
+          "cameraPermission": "Таны апп OCR хийхийн тулд зураг авахад камер ашиглах зөвшөөрөл шаардлагатай.",
+          "photosPermission": "Таны апп OCR хийх зураг сонгоход зургийн санд хандах зөвшөөрөл шаардлагатай.",
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera",
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone",
+          "recordAudioAndroid": true
+        }
+      ]
+    ]
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Таны апп OCR хийхийн тулд зураг авахад камер ашиглах зөвшөөрөл шаардлагатай.",
+        "NSPhotoLibraryUsageDescription": "Таны апп OCR хийх зураг сонгоход зургийн санд хандах зөвшөөрөл шаардлагатай.",
+        "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to access your microphone"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE" 
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
