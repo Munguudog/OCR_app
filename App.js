@@ -1,4 +1,3 @@
-// mongolocr/App.js
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert,
@@ -97,17 +96,86 @@ export default function App() {
     setIsProcessing(true);
     setSelectedImageUri(uri);
     setResultText("Зураг боловсруулж байна...");
+
     try {
-      console.log(`Processing image from ${from}: ${uri}`);
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      const fileName = uri.split('/').pop() || `image_from_${from}`;
-      const recognizedMockText = `Танигдсан: ${fileName.substring(0, 30)}... (Custom OCR Үр Дүн)`;
-      setResultText(recognizedMockText); addHistoryItem(uri, recognizedMockText);
+      console.log(`Processing image from ${from}: ${uri} via backend.`);
+
+      const formData = new FormData();
+      const filename = uri.split('/').pop() || `image_${Date.now()}.jpg`;
+      let fileType = 'image/jpeg'; // Default MIME type
+      const extension = filename.split('.').pop()?.toLowerCase();
+
+      if (extension === 'png') {
+        fileType = 'image/png';
+      } else if (extension === 'jpg' || extension === 'jpeg') {
+        fileType = 'image/jpeg';
+      }
+      // Add more types if needed, e.g., for HEIC, webp etc.
+
+      formData.append('image', {
+        uri: Platform.OS === 'android' && !uri.startsWith('file://') ? `file://${uri}` : uri,
+        name: filename,
+        type: fileType,
+      });
+
+      const backendUrl = 'http://192.168.50.44:5005/ocr'; // Your backend URL
+      console.log(`Sending image to: ${backendUrl}`);
+
+      const response = await fetch(backendUrl, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          // 'Content-Type': 'multipart/form-data' is set automatically by fetch for FormData
+          // 'Accept': 'application/json', // If your backend specifically requires it
+        },
+      });
+
+      console.log(`Response status: ${response.status}`);
+
+      if (!response.ok) {
+        let errorDetail = `Сервер алдаа: ${response.status}`;
+        try {
+          const errorResponseJson = await response.json();
+          errorDetail = errorResponseJson.error || errorResponseJson.message || JSON.stringify(errorResponseJson);
+        } catch (e) {
+          try {
+            const errorResponseText = await response.text();
+            if (errorResponseText) errorDetail = errorResponseText;
+          } catch (e2) { /* ignore */ }
+        }
+        throw new Error(errorDetail);
+      }
+
+      const responseData = await response.json();
+      console.log('Backend response data:', responseData);
+
+      // --- !!! IMPORTANT: ADJUST THE KEY BELOW !!! ---
+      // This line assumes your backend returns JSON like: { "text": "recognized content" }
+      // If your backend uses a different key (e.g., "ocr_result", "transcription"),
+      // change `responseData.text` accordingly.
+      // For example, if response is { "ocr_result": "..." }, use:
+      // const recognizedText = responseData.ocr_result;
+      const recognizedText = responseData.text; // <--- ### ADJUST THIS LINE ###
+
+      if (typeof recognizedText !== 'string') {
+        console.error("Backend response format error. Expected a 'text' field (or your custom key) with a string.", responseData);
+        throw new Error("Серверээс ирсэн хариулт буруу форматтай байна. (Хүлээгдэж буй 'text' талбар олдсонгүй эсвэл стринг биш байна)");
+      }
+
+      setResultText(recognizedText);
+      addHistoryItem(uri, recognizedText);
+
     } catch (error) {
-      console.error("OCR Error:", error);
-      const errorMessage = "OCR хийхэд алдаа гарлаа: " + error.message;
-      setResultText(errorMessage);
-      Alert.alert("Алдаа", errorMessage);
+      console.error("OCR Error (Backend):", error);
+      // Check for network request failed specifically for local dev
+      let displayErrorMessage = error.message;
+      if (error.message && error.message.toLowerCase().includes('network request failed')) {
+          displayErrorMessage = "Сүлжээний алдаа: Сервертэй холбогдож чадсангүй. IP хаяг, порт зөв эсэхийг шалгана уу, эсвэл сервер ажиллаж байгаа эсэхийг шалгана уу.";
+      } else {
+          displayErrorMessage = "OCR хийхэд алдаа гарлаа: " + error.message;
+      }
+      setResultText(displayErrorMessage);
+      Alert.alert("Алдаа", displayErrorMessage);
     } finally {
       setIsProcessing(false);
     }
@@ -146,29 +214,72 @@ export default function App() {
 
   const capturePhoto = async () => {
     if (!cameraRef.current || isProcessing) return;
-    setIsProcessing(true);
+    setIsProcessing(true); // Set processing early in camera capture
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 1.0 });
-      const imageAspectRatio = photo.width / photo.height;
-      let cropWidth, cropHeight, originX, originY;
-      if (imageAspectRatio > frameAspectRatio) {
-          cropHeight = photo.height; cropWidth = Math.floor(cropHeight * frameAspectRatio);
-          originY = 0; originX = Math.floor((photo.width - cropWidth) / 2);
+      const { uri: photoUri, width: imageWidth, height: imageHeight } = photo;
+
+      const { width: previewWidth, height: previewHeight } = Dimensions.get('window');
+      const currentVisualFrameWidth = previewWidth * frameWidthRatio;
+      const currentVisualFrameHeight = currentVisualFrameWidth / frameAspectRatio;
+      const visualFrameScreenX = (previewWidth - currentVisualFrameWidth) / 2;
+      const visualFrameScreenY = (previewHeight - currentVisualFrameHeight) / 2;
+
+      let imageRectX = 0, imageRectY = 0, imageRectWidth = imageWidth, imageRectHeight = imageHeight, scale;
+      const imageAR = imageWidth / imageHeight;
+      const previewAR = previewWidth / previewHeight;
+
+      if (imageAR > previewAR) {
+        scale = previewHeight / imageHeight;
+        imageRectWidth = previewWidth / scale;
+        imageRectX = (imageWidth - imageRectWidth) / 2;
+      } else if (imageAR < previewAR) {
+        scale = previewWidth / imageWidth;
+        imageRectHeight = previewHeight / scale;
+        imageRectY = (imageHeight - imageRectHeight) / 2;
       } else {
-          cropWidth = photo.width; cropHeight = Math.floor(cropWidth / frameAspectRatio);
-          originX = 0; originY = Math.floor((photo.height - cropHeight) / 2);
+        scale = previewWidth / imageWidth;
       }
-      const manipResult = await ImageManipulator.manipulateAsync( photo.uri,
-        [{ crop: { originX, originY, width: cropWidth, height: cropHeight } }],
+
+      const cropParams = {
+        originX: Math.floor(imageRectX + (visualFrameScreenX / scale)),
+        originY: Math.floor(imageRectY + (visualFrameScreenY / scale)),
+        width:   Math.floor(currentVisualFrameWidth / scale),
+        height:  Math.floor(currentVisualFrameHeight / scale),
+      };
+
+      cropParams.originX = Math.max(0, cropParams.originX);
+      cropParams.originY = Math.max(0, cropParams.originY);
+      if (cropParams.originX + cropParams.width > imageWidth) cropParams.width = Math.max(0, imageWidth - cropParams.originX);
+      if (cropParams.originY + cropParams.height > imageHeight) cropParams.height = Math.max(0, imageHeight - cropParams.originY);
+      
+      if (cropParams.width <= 0 || cropParams.height <= 0) {
+        console.error("Алдаатай тайрах хэмжээ:", cropParams, {imageWidth, imageHeight, previewWidth, previewHeight, currentVisualFrameWidth, currentVisualFrameHeight, scale, imageRectX, imageRectY});
+        Alert.alert("Алдаа", "Зургийг тайрч чадсангүй. Хүрээний тооцоололд алдаа гарлаа.");
+        setShowCameraModal(false);
+        setIsProcessing(false); // Ensure setIsProcessing is false on error
+        return;
+      }
+
+      console.log("--- Cropping Debug Info ---");
+      console.log("Photo Dims (imgW, imgH):", imageWidth, imageHeight, "AR:", imageAR.toFixed(2));
+      console.log("Preview Dims (prvW, prvH):", previewWidth, previewHeight, "AR:", previewAR.toFixed(2));
+      console.log("Calculated Crop Params (originX,Y,W,H):", cropParams.originX, cropParams.originY, cropParams.width, cropParams.height);
+      console.log("--- End Cropping Debug Info ---");
+
+      const manipResult = await ImageManipulator.manipulateAsync(
+        photoUri,
+        [{ crop: cropParams }],
         { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
       );
       setShowCameraModal(false);
-      processImage(manipResult.uri, "cropped_camera");
+      // setIsProcessing is already true, processImage will set it to false in finally
+      processImage(manipResult.uri, "cropped_camera_precise");
     } catch (error) {
       console.error("Зураг авах/тайрахад алдаа:", error);
-      Alert.alert("Алдаа", "Зураг авах/тайрахад алдаа гарлаа.");
+      Alert.alert("Алдаа", "Зураг авах/тайрахад алдаа гарлаа: " + error.message);
       setShowCameraModal(false);
-      setIsProcessing(false);
+      setIsProcessing(false); // Ensure setIsProcessing is false on error
     }
   };
 
@@ -266,7 +377,7 @@ export default function App() {
             style={[styles.actionButtonCircular, isProcessing && styles.disabledButton]}
             onPress={pickImageFromGallery}
             disabled={isProcessing}
-            hitSlop={{ top:10, bottom:10, left:10, right:10}} // Touch area-г томсгох
+            hitSlop={{ top:10, bottom:10, left:10, right:10}}
           >
             <Ionicons name="images-outline" size={28} color={isProcessing ? COLORS.disabledText : COLORS.iconAccent} />
           </TouchableOpacity>
@@ -326,7 +437,7 @@ export default function App() {
                 <View style={styles.controlButtonPlaceholder} />
               </View>
 
-              {isProcessing && (
+              {isProcessing && ( // Show processing indicator within camera modal as well
                 <View style={styles.modalProcessingIndicator}>
                   <ActivityIndicator size="large" color={COLORS.textPrimary} />
                   <Text style={styles.modalProcessingText}>Боловсруулж байна...</Text>
@@ -346,7 +457,6 @@ export default function App() {
     </View>
   );
 }
-
 // --- Styles ---
 const styles = StyleSheet.create({
   rootViewContainer: { flex: 1, backgroundColor: COLORS.background },
